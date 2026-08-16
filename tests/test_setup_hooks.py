@@ -101,9 +101,11 @@ def test_ensure_codex_session_id_hook_appends_and_preserves(tmp_path: Path) -> N
     assert "[mcp_servers.super-agents]" in text
     assert 'trusted_hash = "sha256:unrelated"' in text
     assert "[[hooks.SessionStart]]" in text
-    assert f'command = "{INJECT_SESSION_ID_HOOK_PATH}"' in text
+    # Paths are TOML-escaped, so build the expectations the same way the
+    # writer does rather than assuming separators need no escaping.
+    assert f"command = {json.dumps(str(INJECT_SESSION_ID_HOOK_PATH))}" in text
     state_key = f"{config.parent.resolve() / config.name}:session_start:0:0"
-    assert f'[hooks.state."{state_key}"]' in text
+    assert f"[hooks.state.{json.dumps(state_key)}]" in text
     assert "enabled = true" in text
 
 
@@ -140,4 +142,6 @@ def test_ensure_codex_session_id_hook_replaces_stale_block(tmp_path: Path) -> No
     assert "/old/path.sh" not in text
     assert "sha256:stale" not in text
     assert text.count("[[hooks.SessionStart]]") == 1
-    assert text.count(f'[hooks.state."{state_key}"]') == 1
+    # The stale block above uses the legacy unescaped header, so this also
+    # covers upgrading a config written before the key was escaped.
+    assert text.count(f"[hooks.state.{json.dumps(state_key)}]") == 1
