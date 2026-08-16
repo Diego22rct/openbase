@@ -111,8 +111,10 @@ def ensure_codex_session_id_hook(config_path: Path | None = None) -> bool:
         'type = "command"',
         f"command = {json.dumps(command)}",
     ]
+    # TOML basic strings share JSON's escaping rules, so json.dumps is what
+    # keeps Windows path separators from being read as escape sequences.
     state_lines = [
-        f'[hooks.state."{state_key}"]',
+        f"[hooks.state.{json.dumps(state_key)}]",
         f"trusted_hash = {json.dumps(session_start_hook_trusted_hash(command))}",
         "enabled = true",
     ]
@@ -124,6 +126,9 @@ def ensure_codex_session_id_hook(config_path: Path | None = None) -> bool:
             "[[hooks.SessionStart]]",
             "[[hooks.SessionStart.hooks]]",
             state_lines[0],
+            # Installs written before the key was escaped left an invalid
+            # header behind; drop that form too instead of orphaning it.
+            f'[hooks.state."{state_key}"]',
         },
     )
     blocks = [stripped.rstrip("\n")] if stripped.strip() else []
