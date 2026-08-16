@@ -154,12 +154,19 @@ def _service_argv(
 
 def generate_unit(svc: ServiceDefinition, config: InstallationConfig) -> Path:
     from openbase_coder_cli.services.launchd import (
+        _binary_resolvers,
         _log_path,
         _resolve_binaries,
         _runtime_workdir,
     )
 
     binaries = _resolve_binaries(config, [svc])
+    # ``_resolve_binaries`` only resolves keys it finds as ``{placeholder}``
+    # fields in workdir_template; livekit-server's binary need is expressed
+    # via its "kind" dispatch below instead, so it's otherwise never
+    # resolved and generate_unit silently persists "binary": null.
+    if svc.name == "livekit-server" and "livekit" not in binaries:
+        binaries = {**binaries, "livekit": _binary_resolvers(config)["livekit"]()}
     kind, argv, argv_defaults, extra_env, needs_url, binary = _service_argv(
         svc, binaries
     )
