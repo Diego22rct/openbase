@@ -90,6 +90,68 @@ def test_parse_announcer_audio_packet_reads_path():
     assert parse_announcer_packet(packet) is None
 
 
+def test_build_stt_uses_multilingual_model_for_assemblyai(monkeypatch):
+    """AssemblyAI's plugin default (universal-streaming-english) silently
+    drops non-English speech; the agent must request the multilingual model
+    with language detection instead, for both the direct-key and Openbase
+    Cloud-proxied branches."""
+    calls = []
+
+    class FakeSTT(livekit.livekit_stt.STT):
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            super().__init__(
+                capabilities=livekit.livekit_stt.STTCapabilities(
+                    streaming=True, interim_results=True
+                )
+            )
+
+        async def _recognize_impl(self, *args, **kwargs):
+            raise NotImplementedError
+
+    monkeypatch.setattr(livekit.assemblyai, "STT", FakeSTT)
+    monkeypatch.setattr(
+        livekit, "selected_stt_provider_id", lambda: livekit.ASSEMBLYAI_STT_PROVIDER_ID
+    )
+
+    livekit._build_stt()
+
+    assert calls[-1]["model"] == livekit.LIVEKIT_STT_MODEL
+    assert calls[-1]["language_detection"] is True
+
+
+def test_build_stt_uses_multilingual_model_for_openbase_cloud(monkeypatch):
+    calls = []
+
+    class FakeSTT(livekit.livekit_stt.STT):
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+            super().__init__(
+                capabilities=livekit.livekit_stt.STTCapabilities(
+                    streaming=True, interim_results=True
+                )
+            )
+
+        async def _recognize_impl(self, *args, **kwargs):
+            raise NotImplementedError
+
+    monkeypatch.setattr(livekit.assemblyai, "STT", FakeSTT)
+    monkeypatch.setattr(
+        livekit,
+        "selected_stt_provider_id",
+        lambda: livekit.OPENBASE_CLOUD_STT_PROVIDER_ID,
+    )
+    monkeypatch.setattr(livekit, "_openbase_cloud_audio_token", lambda: "token")
+    monkeypatch.setattr(
+        livekit, "_openbase_cloud_audio_ws_base_url", lambda _provider: "wss://x"
+    )
+
+    livekit._build_stt()
+
+    assert calls[-1]["model"] == livekit.LIVEKIT_STT_MODEL
+    assert calls[-1]["language_detection"] is True
+
+
 def test_openbase_cloud_audio_token_fails_closed_when_login_missing(monkeypatch):
     class MissingMachineTokenManager:
         def __init__(self, web_backend_url):

@@ -145,6 +145,11 @@ LIVEKIT_CODEX_APPROVAL_POLICY = os.getenv(
 )
 LIVEKIT_CODEX_SANDBOX = os.getenv(CODEX_SANDBOX_ENV, DEFAULT_CODEX_SANDBOX)
 LIVEKIT_STT_PROVIDER = os.getenv("LIVEKIT_STT_PROVIDER", "assemblyai").lower()
+# AssemblyAI's plugin default (universal-streaming-english) never transcribes
+# non-English speech, so the agent looks like it's silently ignoring
+# non-English callers. Multilingual understands English too, so this is a
+# strictly wider default at no cost to English-only users.
+LIVEKIT_STT_MODEL = os.getenv("LIVEKIT_STT_MODEL", "universal-streaming-multilingual")
 LIVEKIT_VERBOSE_LOGGING = os.getenv("LIVEKIT_VERBOSE_LOGGING", "").strip().lower() in {
     "1",
     "true",

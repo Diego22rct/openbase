@@ -115,6 +115,7 @@ from openbase_coder_cli.livekit_agent.config import (  # noqa: F401
     LIVEKIT_CODEX_THREAD_STATE_PATH,
     LIVEKIT_DISPATCH_AGENT_NAME,
     LIVEKIT_DISPATCHER_CONFIG_PATH,
+    LIVEKIT_STT_MODEL,
     LIVEKIT_STT_PROVIDER,
     LIVEKIT_VERBOSE_LOGGING,
     OPENBASE_CLOUD_AUDIO_BASE_URL,
@@ -344,13 +345,20 @@ def _build_stt(vad_model=None):
         # Explicit format_turns so the plugin emits exactly one (formatted)
         # final transcript per turn instead of an unformatted/formatted pair,
         # each of which would spawn its own LLM generation.
-        stt = assemblyai.STT(api_key=ASSEMBLY_AI_API_KEY, format_turns=True)
+        stt = assemblyai.STT(
+            api_key=ASSEMBLY_AI_API_KEY,
+            format_turns=True,
+            model=LIVEKIT_STT_MODEL,
+            language_detection=True,
+        )
     elif stt_provider == OPENBASE_CLOUD_STT_PROVIDER_ID:
         logger.info("Using Openbase Cloud STT")
         stt = assemblyai.STT(
             api_key=_openbase_cloud_audio_token(),
             base_url=_openbase_cloud_audio_ws_base_url("assemblyai"),
             format_turns=True,
+            model=LIVEKIT_STT_MODEL,
+            language_detection=True,
         )
     elif stt_provider == LOCAL_MLX_WHISPER_STT_PROVIDER_ID:
         logger.info("Using local MLX Whisper STT")
