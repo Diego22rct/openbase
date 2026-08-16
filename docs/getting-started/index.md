@@ -24,8 +24,11 @@ without the desktop app (for example a headless Linux box).
 
 **[Run in Docker](../docker.md)** — the full runtime in a single Linux
 container, joined to your tailnet as its own device. Because Docker Desktop
-runs Linux containers on macOS and Windows, this is currently the way to
-run Openbase Coder on a **Windows** machine.
+runs Linux containers on macOS and Windows, this is currently the
+officially supported way to run Openbase Coder on a **Windows** machine.
+A native Windows runtime (no Docker) is in progress on `develop` — see
+[Windows (Native, Experimental)](windows-native.md) if you want to try it
+early or are developing the port itself.
 
 ---
 

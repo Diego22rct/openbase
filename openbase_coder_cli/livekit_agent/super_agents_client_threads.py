@@ -74,7 +74,7 @@ class SuperAgentsClientThreadsMixin:
         return await self._ensure_thread()
 
     async def _ensure_thread(self) -> str:
-        async with self._state_lock:
+        async with self._loop_safe_lock("_state_lock"):
             if self._state_path is not None:
                 with self._thread_state_file_lock():
                     canonical_thread_id = self._load_thread_id()

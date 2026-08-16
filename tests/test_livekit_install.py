@@ -7,6 +7,7 @@ from openbase_coder_cli.livekit_version import LIVEKIT_SERVER_PINNED_VERSION
 
 
 def test_ensure_skips_when_installed_binary_matches_pin(tmp_path, monkeypatch):
+    monkeypatch.setattr(livekit_install, "is_windows", lambda: False)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     installed = bin_dir / "livekit-server"
@@ -57,6 +58,7 @@ def test_install_replaces_binary_with_fresh_inode(tmp_path, monkeypatch):
     """In-place overwrites of a running signed binary corrupt the kernel's
     cached code signature (execs then die with SIGKILL); the installer must
     rename a freshly staged copy into place instead."""
+    monkeypatch.setattr(livekit_install, "is_windows", lambda: False)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     installed = bin_dir / "livekit-server"

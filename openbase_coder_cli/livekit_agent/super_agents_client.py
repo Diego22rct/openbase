@@ -227,6 +227,21 @@ class SuperAgentsLiveKitClient(
         self._state_lock = asyncio.Lock()
         self._turn_start_lock = asyncio.Lock()
 
+    def _loop_safe_lock(self, attr: str) -> asyncio.Lock:
+        """Return the named lock, recreating it if the running loop changed.
+
+        This client is a long-lived object reused across LiveKit agent jobs;
+        each job can run on its own event loop. An ``asyncio.Lock`` binds to
+        whichever loop first awaits it, so reusing one across jobs raises
+        "bound to a different event loop" — recreate it per-loop instead.
+        """
+        loop = asyncio.get_running_loop()
+        lock: asyncio.Lock = getattr(self, attr)
+        if getattr(lock, "_loop", None) is not loop:
+            lock = asyncio.Lock()
+            setattr(self, attr, lock)
+        return lock
+
     async def run_turn(
         self,
         prompt: str,
@@ -239,7 +254,7 @@ class SuperAgentsLiveKitClient(
         turn_id: str | None = None
         preserve_active_turn = False
 
-        async with self._turn_start_lock:
+        async with self._loop_safe_lock("_turn_start_lock"):
             thread_id = await self._ensure_thread()
             logger.info(
                 "%s stage=voice_request_received dispatch_id=%s thread_id=%s "

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import sys
 import zipfile
 from pathlib import Path
 
@@ -52,7 +53,7 @@ def test_install_honors_syncthing_on_path(tmp_path: Path, monkeypatch) -> None:
 
     result = install.ensure_syncthing_installed(echo=lambda *_: None)
 
-    assert str(result) == "/usr/bin/syncthing"
+    assert result == Path("/usr/bin/syncthing")
 
 
 def test_install_verifies_checksum_and_installs(tmp_path: Path, monkeypatch) -> None:
@@ -76,7 +77,8 @@ def test_install_verifies_checksum_and_installs(tmp_path: Path, monkeypatch) -> 
 
     assert result == target
     assert target.is_file()
-    assert target.stat().st_mode & 0o111
+    if sys.platform != "win32":
+        assert target.stat().st_mode & 0o111
 
 
 def test_install_rejects_checksum_mismatch(tmp_path: Path, monkeypatch) -> None:

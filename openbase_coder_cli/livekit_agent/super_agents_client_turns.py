@@ -75,7 +75,7 @@ class SuperAgentsClientTurnsMixin:
             return None
 
         prompt_debug = _prompt_debug_fields(prompt)
-        async with self._turn_start_lock:
+        async with self._loop_safe_lock("_turn_start_lock"):
             thread_id = await self._ensure_thread()
             if self._active_turn_id:
                 if self._active_turn_has_completed():

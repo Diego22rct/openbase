@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shlex
 import subprocess
 import sys
 import time
@@ -91,13 +90,18 @@ def schedule_restart(
             emit_cli_warning=emit_cli_warning,
         )
 
-    command = _scheduled_restart_command(plan)
+    script = _scheduled_restart_script(plan)
+    detach_kwargs: dict[str, Any] = (
+        {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+        if sys.platform == "win32"
+        else {"start_new_session": True}
+    )
     subprocess.Popen(
-        ["/bin/sh", "-c", command],
+        [sys.executable, "-c", script],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True,
+        **detach_kwargs,
     )
     return plan
 
@@ -155,13 +159,12 @@ def restart_plan_payload(plan: RestartPlan) -> dict[str, Any]:
     }
 
 
-def _scheduled_restart_command(plan: RestartPlan) -> str:
+def _scheduled_restart_script(plan: RestartPlan) -> str:
     payload = json.dumps(asdict(plan), separators=(",", ":"))
-    script = (
+    return (
         "from openbase_coder_cli.services.restart import execute_restart_payload; "
         f"execute_restart_payload({payload!r})"
     )
-    return f"exec {shlex.quote(sys.executable)} -c {shlex.quote(script)}"
 
 
 def _append_unique(items: list[str], item: str) -> None:
