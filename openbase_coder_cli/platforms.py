@@ -36,6 +36,22 @@ def is_supported() -> bool:
     return current_system() in SUPPORTED_SYSTEMS
 
 
+def venv_bin_dir() -> str:
+    """Directory holding console scripts inside a virtualenv."""
+    return "Scripts" if is_windows() else "bin"
+
+
+def executable_suffixes() -> tuple[str, ...]:
+    """Suffixes an executable may carry, most specific first.
+
+    POSIX only has the bare name; Windows console scripts installed by pip
+    and uv are ``.exe``, and some tools ship ``.cmd``/``.bat`` shims.
+    """
+    if is_windows():
+        return (".exe", ".cmd", ".bat", "")
+    return ("",)
+
+
 def service_manager_name() -> str:
     """Name of the supervisor that owns background services on this host."""
     if is_macos():

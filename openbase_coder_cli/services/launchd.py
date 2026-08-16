@@ -18,15 +18,21 @@ import click
 
 from openbase_coder_cli.backend_binaries import backend_binary_candidates
 from openbase_coder_cli.env_file import selected_backend_from_env_file
+from openbase_coder_cli.livekit_install import installed_livekit_server_path
 from openbase_coder_cli.paths import (
     DEFAULT_ENV_FILE_PATH,
     DEFAULT_LOG_DIR,
     LAUNCHD_DOMAIN,
     LAUNCHD_WRAPPER_DIR,
     OPENBASE_BASE_DIR,
-    OPENBASE_BIN_DIR,
     PLIST_DIR,
 )
+from openbase_coder_cli.platforms import (
+    executable_suffixes,
+    is_windows,
+    venv_bin_dir,
+)
+from openbase_coder_cli.process_probe import pid_alive
 from openbase_coder_cli.runtime import stable_runtime_package
 from openbase_coder_cli.services.definitions import (
     RETIRED_SERVICE_NAMES,
@@ -62,10 +68,13 @@ def _workspace_binary_candidates(config: InstallationConfig, name: str) -> list[
     if not config.workspace_path:
         return []
     workspace = Path(config.workspace_path)
+    bin_dir = venv_bin_dir()
+    # Windows venvs use Scripts/ and carry an executable suffix, so probe
+    # every plausible spelling instead of the POSIX bin/<name> only.
     return [
-        workspace / ".venv" / "bin" / name,
-        workspace / "cli" / ".venv" / "bin" / name,
-        workspace / "agent" / ".venv" / "bin" / name,
+        workspace / venv / bin_dir / f"{name}{suffix}"
+        for venv in (".venv", "cli/.venv", "agent/.venv")
+        for suffix in executable_suffixes()
     ]
 
 
@@ -122,7 +131,7 @@ def _binary_resolvers(config: InstallationConfig) -> dict[str, Callable[[], str]
             "livekit-server",
             [package.livekit_server_path]
             if package is not None
-            else [OPENBASE_BIN_DIR / "livekit-server"],
+            else [installed_livekit_server_path()],
             "/opt/homebrew/bin/livekit-server",
         ),
         "python": lambda: _resolve_service_python(package),
@@ -212,16 +221,42 @@ def _truncate_existing_logs(svc: ServiceDefinition) -> None:
 
 
 def _service_command(pid: int) -> str:
-    result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "command="],
-        capture_output=True,
-        text=True,
-        check=False,
+    if is_windows():
+        return _service_command_windows(pid)
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return ""
+    return result.stdout.strip()
+
+
+def _service_command_windows(pid: int) -> str:
+    # CommandLine is not in tasklist output, so ask CIM for the full command.
+    script = (
+        "$p = Get-CimInstance Win32_Process -Filter 'ProcessId = %d' "
+        "-ErrorAction SilentlyContinue; if ($p) { $p.CommandLine }" % pid
     )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
     return result.stdout.strip()
 
 
 def _listening_pids(port: int) -> set[int]:
+    if is_windows():
+        return _listening_pids_netstat(port)
     try:
         result = subprocess.run(
             ["lsof", "-nP", f"-iTCP:{port}", "-sTCP:LISTEN", "-t"],
@@ -259,7 +294,42 @@ def _listening_pids_ss(port: int) -> set[int]:
     return pids
 
 
+def _listening_pids_netstat(port: int) -> set[int]:
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return set()
+    pids: set[int] = set()
+    for line in result.stdout.splitlines():
+        fields = line.split()
+        if len(fields) < 5 or fields[3].upper() != "LISTENING":
+            continue
+        local_address = fields[1]
+        _, separator, local_port = local_address.rpartition(":")
+        if not separator or local_port != str(port):
+            continue
+        if fields[4].isdigit():
+            pids.add(int(fields[4]))
+    return pids
+
+
 def _signal_pid(pid: int, sig: signal.Signals) -> None:
+    if is_windows():
+        # Windows has no SIGTERM delivery; terminate the tree instead so the
+        # supervisor does not leave the real service holding the port.
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", "/F"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        return
     try:
         os.kill(pid, sig)
     except ProcessLookupError:
@@ -302,12 +372,18 @@ def _cleanup_lingering_processes(svc: ServiceDefinition) -> None:
 
 def _ensure_launchd_paths() -> None:
     DEFAULT_LOG_DIR.mkdir(parents=True, exist_ok=True)
-    LAUNCHD_WRAPPER_DIR.mkdir(parents=True, exist_ok=True)
     if _is_macos():
+        LAUNCHD_WRAPPER_DIR.mkdir(parents=True, exist_ok=True)
         PLIST_DIR.mkdir(parents=True, exist_ok=True)
+    elif is_windows():
+        from openbase_coder_cli.paths import WINDOWS_RUN_DIR, WINDOWS_UNIT_DIR
+
+        WINDOWS_UNIT_DIR.mkdir(parents=True, exist_ok=True)
+        WINDOWS_RUN_DIR.mkdir(parents=True, exist_ok=True)
     else:
         from openbase_coder_cli.paths import SYSTEMD_UNIT_DIR
 
+        LAUNCHD_WRAPPER_DIR.mkdir(parents=True, exist_ok=True)
         SYSTEMD_UNIT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -316,6 +392,13 @@ def _write_service_files(
     config: InstallationConfig,
     binaries: dict[str, str],
 ) -> None:
+    if is_windows():
+        # Windows units carry their own launch plan, so there is no shell
+        # wrapper to generate.
+        from openbase_coder_cli.services.windows import generate_unit as generate_win
+
+        generate_win(svc, config)
+        return
     generate_wrapper(svc, config, binaries)
     if _is_macos():
         generate_plist(svc, config)
@@ -428,6 +511,11 @@ def _launchctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def launchctl_bootstrap(svc: ServiceDefinition) -> None:
+    if is_windows():
+        from openbase_coder_cli.services.windows import windows_bootstrap
+
+        windows_bootstrap(svc)
+        return
     if not _is_macos():
         from openbase_coder_cli.services.systemd import systemd_bootstrap
 
@@ -456,6 +544,10 @@ def launchctl_bootstrap(svc: ServiceDefinition) -> None:
 
 
 def launchctl_bootout(svc: ServiceDefinition) -> bool:
+    if is_windows():
+        from openbase_coder_cli.services.windows import windows_bootout
+
+        return windows_bootout(svc)
     if not _is_macos():
         from openbase_coder_cli.services.systemd import systemd_bootout
 
@@ -468,6 +560,10 @@ def launchctl_bootout(svc: ServiceDefinition) -> bool:
 
 
 def launchctl_kickstart(svc: ServiceDefinition) -> bool:
+    if is_windows():
+        from openbase_coder_cli.services.windows import windows_kickstart
+
+        return windows_kickstart(svc)
     if not _is_macos():
         from openbase_coder_cli.services.systemd import systemd_kickstart
 
@@ -480,6 +576,10 @@ def launchctl_kickstart(svc: ServiceDefinition) -> bool:
 
 
 def launchctl_kill(svc: ServiceDefinition) -> bool:
+    if is_windows():
+        from openbase_coder_cli.services.windows import windows_kill
+
+        return windows_kill(svc)
     if not _is_macos():
         from openbase_coder_cli.services.systemd import systemd_kill
 
@@ -510,11 +610,8 @@ def _external_supervisor_status(svc: ServiceDefinition) -> dict:
         pid = int((EXTERNAL_SUPERVISOR_RUN_DIR / f"{svc.name}.pid").read_text().strip())
     except (OSError, ValueError):
         pid = None
-    if pid is not None:
-        try:
-            os.kill(pid, 0)
-        except OSError:
-            pid = None
+    if not pid_alive(pid):
+        pid = None
     if not svc.install_by_default and pid is None:
         # Wrapper regeneration writes files for optional services (code-sync,
         # cloud heartbeat) regardless of whether their feature is on; under
@@ -527,6 +624,10 @@ def _external_supervisor_status(svc: ServiceDefinition) -> dict:
 def launchctl_status(svc: ServiceDefinition) -> dict:
     if _external_supervisor():
         return _external_supervisor_status(svc)
+    if is_windows():
+        from openbase_coder_cli.services.windows import windows_status
+
+        return windows_status(svc)
     if not _is_macos():
         from openbase_coder_cli.services.systemd import systemd_status
 

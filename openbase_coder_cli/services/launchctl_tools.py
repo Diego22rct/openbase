@@ -11,6 +11,7 @@ from pathlib import Path
 import click
 
 from openbase_coder_cli.paths import LAUNCHD_DOMAIN
+from openbase_coder_cli.platforms import is_windows
 from openbase_coder_cli.services.console_settings import get_ignored_launchctl_labels
 from openbase_coder_cli.services.voice_warning import warn_before_voice_interruption
 
@@ -68,6 +69,10 @@ class LaunchctlService:
 
 
 def list_launchctl_services_payload(include_ignored: bool = False) -> dict:
+    if is_windows():
+        from openbase_coder_cli.services.windows import list_windows_services_payload
+
+        return list_windows_services_payload(include_ignored)
     if platform.system() != "Darwin":
         from openbase_coder_cli.services.systemd import list_systemd_services_payload
 
@@ -91,6 +96,11 @@ def list_launchctl_services_payload(include_ignored: bool = False) -> dict:
 
 
 def run_launchctl_service_action(label: str, action: str) -> None:
+    if is_windows():
+        from openbase_coder_cli.services.windows import run_windows_service_action
+
+        run_windows_service_action(label, action)
+        return
     if platform.system() != "Darwin":
         from openbase_coder_cli.services.systemd import run_systemd_service_action
 

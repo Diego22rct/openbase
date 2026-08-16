@@ -41,6 +41,10 @@ DEFAULT_LOG_DIR = OPENBASE_BASE_DIR / "logs"
 LAUNCHD_WRAPPER_DIR = OPENBASE_BASE_DIR / "launchd"
 PLIST_DIR = Path.home() / "Library" / "LaunchAgents"
 SYSTEMD_UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
+# Windows has no user-level service manager, so units are JSON descriptors
+# read by the openbase-coder supervisor rather than OS-native unit files.
+WINDOWS_UNIT_DIR = OPENBASE_BASE_DIR / "windows-units"
+WINDOWS_RUN_DIR = OPENBASE_BASE_DIR / "run"
 LAUNCHD_DOMAIN = "com.openbase.coder"
 AUTH_JSON_PATH = OPENBASE_BASE_DIR / "auth.json"
 SYNC_CONFIG_PATH = OPENBASE_BASE_DIR / "sync-config.json"
