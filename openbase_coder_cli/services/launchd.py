@@ -375,7 +375,7 @@ def _ensure_launchd_paths() -> None:
     if _is_macos():
         LAUNCHD_WRAPPER_DIR.mkdir(parents=True, exist_ok=True)
         PLIST_DIR.mkdir(parents=True, exist_ok=True)
-    elif is_windows():
+    elif is_windows():  # noqa: SIM114 - keeps the three hosts visibly distinct
         from openbase_coder_cli.paths import WINDOWS_RUN_DIR, WINDOWS_UNIT_DIR
 
         WINDOWS_UNIT_DIR.mkdir(parents=True, exist_ok=True)
@@ -392,7 +392,7 @@ def _write_service_files(
     config: InstallationConfig,
     binaries: dict[str, str],
 ) -> None:
-    if is_windows():
+    if not _is_macos() and is_windows():
         # Windows units carry their own launch plan, so there is no shell
         # wrapper to generate.
         from openbase_coder_cli.services.windows import generate_unit as generate_win
@@ -511,12 +511,12 @@ def _launchctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def launchctl_bootstrap(svc: ServiceDefinition) -> None:
-    if is_windows():
-        from openbase_coder_cli.services.windows import windows_bootstrap
-
-        windows_bootstrap(svc)
-        return
     if not _is_macos():
+        if is_windows():
+            from openbase_coder_cli.services.windows import windows_bootstrap
+
+            windows_bootstrap(svc)
+            return
         from openbase_coder_cli.services.systemd import systemd_bootstrap
 
         systemd_bootstrap(svc)
@@ -544,11 +544,11 @@ def launchctl_bootstrap(svc: ServiceDefinition) -> None:
 
 
 def launchctl_bootout(svc: ServiceDefinition) -> bool:
-    if is_windows():
-        from openbase_coder_cli.services.windows import windows_bootout
-
-        return windows_bootout(svc)
     if not _is_macos():
+        if is_windows():
+            from openbase_coder_cli.services.windows import windows_bootout
+
+            return windows_bootout(svc)
         from openbase_coder_cli.services.systemd import systemd_bootout
 
         return systemd_bootout(svc)
@@ -560,11 +560,11 @@ def launchctl_bootout(svc: ServiceDefinition) -> bool:
 
 
 def launchctl_kickstart(svc: ServiceDefinition) -> bool:
-    if is_windows():
-        from openbase_coder_cli.services.windows import windows_kickstart
-
-        return windows_kickstart(svc)
     if not _is_macos():
+        if is_windows():
+            from openbase_coder_cli.services.windows import windows_kickstart
+
+            return windows_kickstart(svc)
         from openbase_coder_cli.services.systemd import systemd_kickstart
 
         return systemd_kickstart(svc)
@@ -576,11 +576,11 @@ def launchctl_kickstart(svc: ServiceDefinition) -> bool:
 
 
 def launchctl_kill(svc: ServiceDefinition) -> bool:
-    if is_windows():
-        from openbase_coder_cli.services.windows import windows_kill
-
-        return windows_kill(svc)
     if not _is_macos():
+        if is_windows():
+            from openbase_coder_cli.services.windows import windows_kill
+
+            return windows_kill(svc)
         from openbase_coder_cli.services.systemd import systemd_kill
 
         return systemd_kill(svc)
@@ -624,11 +624,11 @@ def _external_supervisor_status(svc: ServiceDefinition) -> dict:
 def launchctl_status(svc: ServiceDefinition) -> dict:
     if _external_supervisor():
         return _external_supervisor_status(svc)
-    if is_windows():
-        from openbase_coder_cli.services.windows import windows_status
-
-        return windows_status(svc)
     if not _is_macos():
+        if is_windows():
+            from openbase_coder_cli.services.windows import windows_status
+
+            return windows_status(svc)
         from openbase_coder_cli.services.systemd import systemd_status
 
         return systemd_status(svc)

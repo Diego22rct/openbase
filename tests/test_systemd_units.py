@@ -93,7 +93,10 @@ def test_systemd_status_not_installed(monkeypatch):
 
 
 def test_launchctl_status_dispatches_to_systemd_off_macos(monkeypatch):
+    # Three hosts now share the facade, so pin Linux instead of relying on
+    # "not macOS", which Windows also satisfies.
     monkeypatch.setattr(launchd, "_is_macos", lambda: False)
+    monkeypatch.setattr(launchd, "is_windows", lambda: False)
     monkeypatch.setattr(
         systemd, "systemd_status", lambda svc: {"installed": True, "pid": "7"}
     )
