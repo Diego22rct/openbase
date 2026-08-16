@@ -2,10 +2,8 @@ from __future__ import annotations
 
 import os
 import platform
-import re
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import textwrap
@@ -34,6 +32,7 @@ from openbase_coder_cli.platforms import (
 )
 from openbase_coder_cli.process_probe import pid_alive
 from openbase_coder_cli.runtime import stable_runtime_package
+from openbase_coder_cli.services import process_utils
 from openbase_coder_cli.services.definitions import (
     RETIRED_SERVICE_NAMES,
     SERVICES,
@@ -48,10 +47,18 @@ def _is_macos() -> bool:
     return platform.system() == "Darwin"
 
 
+def _is_windows() -> bool:
+    return sys.platform == "win32"
+
+
 def _resolve_binary(name: str, homebrew_fallback: str | None = None) -> str:
     path = shutil.which(name)
     if path:
         return path
+    py_dir = Path(sys.executable).parent
+    for candidate in [py_dir / name, py_dir / f"{name}.exe"]:
+        if candidate.is_file():
+            return str(candidate)
     fallbacks: list[Path] = []
     if homebrew_fallback:
         fallbacks.append(Path(homebrew_fallback))
@@ -84,7 +91,7 @@ def _resolve_binary_with_preferred_paths(
     homebrew_fallback: str | None = None,
 ) -> str:
     for path in preferred_paths:
-        if path.is_file() and os.access(path, os.X_OK):
+        if path.is_file() and (sys.platform == "win32" or os.access(path, os.X_OK)):
             return str(path)
     return _resolve_binary(name, homebrew_fallback)
 
@@ -148,12 +155,14 @@ def _binary_resolvers(config: InstallationConfig) -> dict[str, Callable[[], str]
 
 
 def _service_template_keys(services: Iterable[ServiceDefinition]) -> set[str]:
+    # ``command_template`` is now a plain runner key (see services/runners.py)
+    # and never contains ``{...}`` fields — only ``workdir_template`` still
+    # needs scanning (e.g. "{runtime_workdir}").
     keys: set[str] = set()
     for svc in services:
-        for template in (svc.command_template, svc.workdir_template):
-            for _text, field, _spec, _conv in Formatter().parse(template):
-                if field:
-                    keys.add(field)
+        for _text, field, _spec, _conv in Formatter().parse(svc.workdir_template):
+            if field:
+                keys.add(field)
     return keys
 
 
@@ -170,7 +179,9 @@ def _resolve_binaries(
     if services is None:
         services = SERVICES
     resolvers = _binary_resolvers(config)
-    keys = _service_template_keys(services)
+    # "python" is always needed: every wrapper now execs the runner module
+    # through it, regardless of what workdir_template references.
+    keys = _service_template_keys(services) | {"python"}
     return {key: resolvers[key]() for key in sorted(keys) if key in resolvers}
 
 
@@ -334,20 +345,18 @@ def _signal_pid(pid: int, sig: signal.Signals) -> None:
         os.kill(pid, sig)
     except ProcessLookupError:
         return
-
-
 def _matches_cleanup_signature(svc: ServiceDefinition, pid: int) -> bool:
     if not svc.cleanup_command_substrings:
         return True
 
-    command = _service_command(pid)
+    command = process_utils.process_cmdline(pid)
     return all(token in command for token in svc.cleanup_command_substrings)
 
 
 def _cleanup_candidate_pids(svc: ServiceDefinition) -> set[int]:
     candidates: set[int] = set()
     for port in svc.cleanup_ports:
-        for pid in _listening_pids(port):
+        for pid in process_utils.listening_pids(port):
             if _matches_cleanup_signature(svc, pid):
                 candidates.add(pid)
     return candidates
@@ -360,14 +369,14 @@ def _cleanup_lingering_processes(svc: ServiceDefinition) -> None:
         return
 
     for pid in lingering_pids:
-        _signal_pid(pid, signal.SIGTERM)
+        process_utils.terminate(pid)
 
     time.sleep(1)
 
     stubborn_pids = _cleanup_candidate_pids(svc)
 
     for pid in stubborn_pids:
-        _signal_pid(pid, signal.SIGKILL)
+        process_utils.terminate(pid, force=True)
 
 
 def _ensure_launchd_paths() -> None:
@@ -424,11 +433,13 @@ def generate_wrapper(
     env_file = config.env_file
     data_dir = str(OPENBASE_BASE_DIR)
 
-    # Binary paths land in shell command position (e.g. the bundled CLI under
-    # "/Applications/Openbase Coder.app" contains a space) — quote them.
-    quoted_binaries = {name: shlex.quote(path) for name, path in binaries.items()}
-    template_vars = {"workspace": workspace, "data_dir": data_dir, **quoted_binaries}
-    cmd = svc.command_template.format(**template_vars)
+    # The python path lands in shell command position (e.g. the bundled CLI
+    # under "/Applications/Openbase Coder.app" contains a space) — quote it.
+    python_bin = shlex.quote(binaries["python"])
+    cmd = (
+        f"exec {python_bin} -m openbase_coder_cli.services.runners "
+        f"{svc.command_template}"
+    )
     workdir = svc.workdir_template.format(
         workspace=workspace, data_dir=data_dir, **binaries
     )
