@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import base64
 import contextlib
-import fcntl
 import hashlib
 import json
 import logging
@@ -22,6 +21,7 @@ from typing import Any
 
 import httpx
 
+from openbase_coder_cli.file_lock import LOCK_EX, LOCK_UN, flock
 from openbase_coder_cli.paths import AUTH_JSON_PATH
 
 logger = logging.getLogger(__name__)
@@ -96,10 +96,10 @@ class TokenManager:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT, 0o600)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX)
+            flock(fd, LOCK_EX)
             yield
         finally:
-            fcntl.flock(fd, fcntl.LOCK_UN)
+            flock(fd, LOCK_UN)
             os.close(fd)
 
     # ------------------------------------------------------------------
